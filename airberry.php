@@ -34,10 +34,33 @@ class ProductSync
         header("Content-Length: 0");
         flush();
 
+        self::log_request($request);
+
         // Continue in background
-        self::perform_sync();
+        // self::perform_sync();
 
         exit;
+    }
+
+    private static function log_request(\WP_REST_Request $request){
+        $pluginlog = plugin_dir_path(__FILE__) . 'debug.log';
+
+        $method = $request->get_method();
+        $route = $request->get_route();
+        $params = $request->get_params();
+        $headers = $request->get_headers();
+        $body = $request->get_body();
+    
+        $log_data = [
+            'Method' => $method,
+            'Route' => $route,
+            'Params' => $params,
+            'Headers' => $headers,
+            'Body' => $body,
+        ];
+    
+        $message = print_r($log_data, true);
+        error_log("=== WP REST Request ===\n" . $message . "\n", 3, $pluginlog);
     }
 
     public static function perform_sync()
