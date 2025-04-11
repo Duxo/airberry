@@ -34,15 +34,16 @@ class ProductSync
         header("Content-Length: 0");
         flush();
 
-        self::log_request($request);
-
         // Continue in background
-        // self::perform_sync();
+        self::perform_sync();
+
+        // self::log_request($request);
 
         exit;
     }
 
-    private static function log_request(\WP_REST_Request $request){
+    private static function log_request(\WP_REST_Request $request)
+    {
         $pluginlog = plugin_dir_path(__FILE__) . 'debug.log';
 
         $method = $request->get_method();
@@ -50,7 +51,7 @@ class ProductSync
         $params = $request->get_params();
         $headers = $request->get_headers();
         $body = $request->get_body();
-    
+
         $log_data = [
             'Method' => $method,
             'Route' => $route,
@@ -58,41 +59,78 @@ class ProductSync
             'Headers' => $headers,
             'Body' => $body,
         ];
-    
+
         $message = print_r($log_data, true);
         error_log("=== WP REST Request ===\n" . $message . "\n", 3, $pluginlog);
     }
 
     public static function perform_sync()
     {
-        // Delete all existing products
+        $airtable_data = self::get_airtable_data(); // ['recXXXXX' => [data]]
         $products = wc_get_products(['limit' => -1]);
+
         foreach ($products as $product) {
-            wp_delete_post($product->get_id(), true);
+            $id = $product->get_name();
+
+            if (!isset($airtable_data[$id])) {
+                wp_delete_post($product->get_id(), true);
+                continue;
+            }
+
+            $data = $airtable_data[$id];
+            unset($airtable_data[$id]);
+            if ($data->time !== $product->get_meta('time', true)) {
+                self::update_record($product, $data);
+            }
         }
 
-        /*
-        // Fetch from Airtable
-        $airtable_data = self::get_airtable_data();
-
-        // Create new products
-        foreach ($airtable_data as $item) {
-            $product = new \WC_Product_Simple();
-            $product->set_name($item['name']);
-            $product->set_regular_price($item['price']);
-            $product->set_description($item['description']);
-            $product->save();
+        // Create new products for remaining Airtable records
+        foreach ($airtable_data as $id => $data) {
+            $product = new WC_Product_Simple();
+            self::update_record($product, $data);
         }
-        */
+    }
+
+    private static function update_record($product, $d)
+    {
+        $product->set_name($d->name);
+        $product->set_price($d->price);
+        $product->set_description($d->description);
+        $product->set_meta_data([
+            'time' => $d->time
+        ]);
+        $product->save();
     }
 
     private static function get_airtable_data(): array
     {
-	$api_key = defined('AIRBERRY_API_KEY') ? AIRBERRY_API_KEY : 'the_key_is_missing';
-        $base_id = 'your_base_id';
-        $table = 'Products';
+        $api_key = defined('AIRBERRY_API_KEY') ? AIRBERRY_API_KEY : 'the_key_is_missing';
+        $base_id = 'appSZ5xnr8W0wI5tN';
+        $table = 'tblHi0Fn7quCOwSFJ';
 
-        $url = "https://api.airtable.com/v0/{$base_id}/{$table}";
+        $fields = [
+            'fldmlebQ5td40INq6',
+            'fld0infbLQmtiGaEH',
+            'fldLjMVW7MgmC85Xb',
+            'fldfEfr9bdZdv8ADH',
+            'fldDPGRoce8ES0X4s',
+            'fldiZgqzdrMJ00QWA',
+            'fldQtoHZjVvA0Lmb0',
+            'fldtU8mqRISmCw29z',
+            'fldTIsRuxxk4lrd6O',
+            'fldM1MgpPk3qfjdLR',
+            'fld3ssxZ1B9A63KRe',
+            'fldErzGjMLbDvDK5q',
+            'fldgHmpQj7pm8kgT8'
+        ];
+
+        $query = http_build_query([
+            'filterByFormula' => 'Stav = "Aktivní"',
+            'fields' => $fields
+        ]);
+
+        $url = "https://api.airtable.com/v0/{$base_id}/{$table}?{$query}";
+
         $response = wp_remote_get($url, [
             'headers' => [
                 'Authorization' => 'Bearer ' . $api_key,
@@ -105,18 +143,66 @@ class ProductSync
 
         $body = wp_remote_retrieve_body($response);
         $json = json_decode($body, true);
+        if (!empty($json['records'])) {
+            return [];
+        }
+
         $data = [];
 
-        if (!empty($json['records'])) {
-            foreach ($json['records'] as $record) {
-                $fields = $record['fields'];
-                $data[] = [
-                    'name' => $fields['Name'] ?? 'No Name',
-                    'price' => $fields['Price'] ?? '0',
-                    'description' => $fields['Description'] ?? '',
-                ];
+        foreach ($json['records'] as $record) {
+            $fields = $record['fields'];
+            $id = $record['id'];
+
+            $photos = [];
+            if (!empty($fields['Fotky'])) {
+                foreach ($fields['Fotky'] as $photo) {
+                    $photos[] = [
+                        'id' => $photo['id'],
+                        'url' => $photo['url'],
+                        'filename' => $photo['filename'],
+                    ];
+                }
             }
+
+            $des = '';
+
+            $des .= isset($fields['Délka']) ? "Délka: {$fields['Délka']}\n" : '';
+            $des .= isset($fields['Váha']) ? "Váha: {$fields['Váha']}\n" : '';
+            $des .= isset($fields['Tmavost']) ? "Tmavost: {$fields['Tmavost']}\n" : '';
+            $des .= isset($fields['Struktura']) ? "Struktura: {$fields['Struktura']}\n" : '';
+            $des .= isset($fields['Jemnost']) ? "Jemnost: {$fields['Jemnost']}\n" : '';
+            $des .= isset($fields['Původ']) ? "Původ: {$fields['Původ']}\n" : '';
+            $des .= isset($fields['Cena za gram']) ? "Cena za gram: {$fields['Cena za gram']}\n" : '';
+            $des .= isset($fields['Cena copu']) ? "Cena copu: {$fields['Cena copu']}\n" : '';
+            $des .= isset($fields['Lesk']) ? "Lesk: {$fields['Lesk']}\n" : '';
+            $des .= isset($fields['Stav copu']) ? "Stav copu: {$fields['Stav copu']}\n" : '';
+            $des .= isset($fields['Poznámka']) && $fields['Poznámka'] !== '' ? "Poznámka: {$fields['Poznámka']}\n" : '';
+
+            // If you want to trim off the last newline:
+            $des = trim($des);
+
+            $d = new stdClass();
+            $d->name = $id;
+            $d->time = $fields['Datum modifikace'];
+            $d->description = $des;
+            $d->photos = $photos;
+            $data[$id] = $d;
+
+            $d->cena_za_gram = $fields['Cena za gram'] ?? null;
+            $d->delka = $fields['Délka'] ?? null;
+            $d->vaha = $fields['Váha'] ?? null;
+            $d->tmavost = $fields['Tmavost'] ?? null;
+            $d->stav_copu = $fields['Stav copu'] ?? null;
+            $d->struktura = $fields['Struktura'] ?? null;
+            $d->jemnost = $fields['Jemnost'] ?? null;
+            $d->puvod = $fields['Původ'] ?? null;
+            $d->fotky = $photos;
+            $d->cena_copu = $fields['Cena copu'] ?? 0;
+            $d->lesk = $fields['Lesk'] ?? null;
+            $d->poznamka = $fields['Poznámka'] ?? '';
+            $d->datum_modifikace = $fields['Datum modifikace'] ?? $record['createdTime'];
         }
+
 
         return $data;
     }
