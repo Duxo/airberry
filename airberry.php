@@ -45,7 +45,7 @@ class ProductSync
 
         // == Continue in background ==
 
-        self::delete_all();
+        // self::delete_all();
         self::perform_sync();
         // self::log_request($request);
 
