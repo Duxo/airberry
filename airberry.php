@@ -7,6 +7,11 @@ namespace AirBerry;
 
 defined('ABSPATH') || exit;
 
+require_once ABSPATH . 'wp-admin/includes/file.php';
+require_once ABSPATH . 'wp-admin/includes/media.php';
+require_once ABSPATH . 'wp-admin/includes/image.php';
+require_once 'product.php';
+
 class ProductSync
 {
     public static function init()
@@ -34,39 +39,33 @@ class ProductSync
         header("Content-Length: 0");
         flush();
 
-        // Continue in background
-        self::perform_sync();
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
 
+        // == Continue in background ==
+
+        self::delete_all();
+        self::perform_sync();
         // self::log_request($request);
 
         exit;
     }
 
-    private static function log_request(\WP_REST_Request $request)
+    private static function delete_all()
     {
-        $pluginlog = plugin_dir_path(__FILE__) . 'debug.log';
+        $products = wc_get_products(['limit' => -1]);
 
-        $method = $request->get_method();
-        $route = $request->get_route();
-        $params = $request->get_params();
-        $headers = $request->get_headers();
-        $body = $request->get_body();
-
-        $log_data = [
-            'Method' => $method,
-            'Route' => $route,
-            'Params' => $params,
-            'Headers' => $headers,
-            'Body' => $body,
-        ];
-
-        $message = print_r($log_data, true);
-        error_log("=== WP REST Request ===\n" . $message . "\n", 3, $pluginlog);
+        foreach ($products as $product) {
+            wp_delete_post($product->get_id(), true);
+        }
     }
+
 
     public static function perform_sync()
     {
-        $airtable_data = self::get_airtable_data(); // ['recXXXXX' => [data]]
+        $airtable_data = self::get_airtable_data();
+
         $products = wc_get_products(['limit' => -1]);
 
         foreach ($products as $product) {
@@ -86,21 +85,71 @@ class ProductSync
 
         // Create new products for remaining Airtable records
         foreach ($airtable_data as $id => $data) {
-            $product = new WC_Product_Simple();
+            $product = new \WC_Product_Simple();
             self::update_record($product, $data);
         }
     }
 
-    private static function update_record($product, $d)
+    private static function update_record($product, $data)
     {
-        $product->set_name($d->name);
-        $product->set_price($d->price);
-        $product->set_description($d->description);
+        $product->set_name($data->name);
+        $product->set_price($data->price);
+        $product->set_regular_price($data->price);
+        $product->set_description($data->description);
         $product->set_meta_data([
-            'time' => $d->time
+            'time' => $data->time
         ]);
+
+        if (count($data->photos) != 0) {
+            $photo = $data->photos[0];
+            $image_id = self::get_or_download_image($photo->id, $photo->url);
+            if ($image_id) {
+                $product->set_image_id($image_id);
+            }
+        }
+
         $product->save();
     }
+
+    private static function get_or_download_image($photo_id, $url)
+    {
+        $existing = get_page_by_title($photo_id, OBJECT, 'attachment');
+
+        if ($existing) {
+            return $existing->ID;
+        }
+
+        $tmp = download_url($url);
+
+        if (is_wp_error($tmp)) {
+            return 0;
+        }
+
+        $file_array = [
+            'name' => $photo_id . '.png',
+            'tmp_name' => $tmp,
+        ];
+
+        // Upload the file into the media library
+        $id = media_handle_sideload($file_array, 0);
+
+        // Cleanup temp file
+        @unlink($tmp);
+
+        if (is_wp_error($id)) {
+            error_log('Image upload failed: ' . $id->get_error_message());
+            return 0;
+        }
+
+        // Rename title of attachment for future checking
+        wp_update_post([
+            'ID' => $id,
+            'post_title' => $photo_id,
+        ]);
+
+        return $id;
+    }
+
 
     private static function get_airtable_data(): array
     {
@@ -143,7 +192,7 @@ class ProductSync
 
         $body = wp_remote_retrieve_body($response);
         $json = json_decode($body, true);
-        if (!empty($json['records'])) {
+        if (empty($json['records'])) {
             return [];
         }
 
@@ -156,11 +205,7 @@ class ProductSync
             $photos = [];
             if (!empty($fields['Fotky'])) {
                 foreach ($fields['Fotky'] as $photo) {
-                    $photos[] = [
-                        'id' => $photo['id'],
-                        'url' => $photo['url'],
-                        'filename' => $photo['filename'],
-                    ];
+                    $photos[] = new Image($photo['id'], $photo['url']);
                 }
             }
 
@@ -173,39 +218,47 @@ class ProductSync
             $des .= isset($fields['Jemnost']) ? "Jemnost: {$fields['Jemnost']}\n" : '';
             $des .= isset($fields['Původ']) ? "Původ: {$fields['Původ']}\n" : '';
             $des .= isset($fields['Cena za gram']) ? "Cena za gram: {$fields['Cena za gram']}\n" : '';
-            $des .= isset($fields['Cena copu']) ? "Cena copu: {$fields['Cena copu']}\n" : '';
             $des .= isset($fields['Lesk']) ? "Lesk: {$fields['Lesk']}\n" : '';
             $des .= isset($fields['Stav copu']) ? "Stav copu: {$fields['Stav copu']}\n" : '';
             $des .= isset($fields['Poznámka']) && $fields['Poznámka'] !== '' ? "Poznámka: {$fields['Poznámka']}\n" : '';
-
-            // If you want to trim off the last newline:
             $des = trim($des);
 
-            $d = new stdClass();
-            $d->name = $id;
-            $d->time = $fields['Datum modifikace'];
-            $d->description = $des;
-            $d->photos = $photos;
-            $data[$id] = $d;
-
-            $d->cena_za_gram = $fields['Cena za gram'] ?? null;
-            $d->delka = $fields['Délka'] ?? null;
-            $d->vaha = $fields['Váha'] ?? null;
-            $d->tmavost = $fields['Tmavost'] ?? null;
-            $d->stav_copu = $fields['Stav copu'] ?? null;
-            $d->struktura = $fields['Struktura'] ?? null;
-            $d->jemnost = $fields['Jemnost'] ?? null;
-            $d->puvod = $fields['Původ'] ?? null;
-            $d->fotky = $photos;
-            $d->cena_copu = $fields['Cena copu'] ?? 0;
-            $d->lesk = $fields['Lesk'] ?? null;
-            $d->poznamka = $fields['Poznámka'] ?? '';
-            $d->datum_modifikace = $fields['Datum modifikace'] ?? $record['createdTime'];
+            $data[$id] = new ProductData($id, $fields['Cena copu'], $fields['Datum modifikace'], $des, $photos);
         }
-
 
         return $data;
     }
+
+    private static function log($message)
+    {
+        $pluginlog = plugin_dir_path(__FILE__) . 'debug.log';
+        if (!is_string($message)) {
+            $message = print_r($message, true);
+        }
+        error_log($message . "\n", 3, $pluginlog);
+    }
+
+    private static function log_request(\WP_REST_Request $request)
+    {
+        $method = $request->get_method();
+        $route = $request->get_route();
+        $params = $request->get_params();
+        $headers = $request->get_headers();
+        $body = $request->get_body();
+
+        $log_data = [
+            'Method' => $method,
+            'Route' => $route,
+            'Params' => $params,
+            'Headers' => $headers,
+            'Body' => $body,
+        ];
+
+        $message = print_r($log_data, true);
+        self::log("=== WP REST Request ===\n" . $message . "\n");
+    }
+
+
 }
 
 ProductSync::init();
