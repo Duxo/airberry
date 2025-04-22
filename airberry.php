@@ -11,6 +11,7 @@ require_once ABSPATH . 'wp-admin/includes/file.php';
 require_once ABSPATH . 'wp-admin/includes/media.php';
 require_once ABSPATH . 'wp-admin/includes/image.php';
 require_once 'product.php';
+require_once 'logger.php';
 
 class ProductSync
 {
@@ -29,16 +30,14 @@ class ProductSync
     }
 
     public static function handle_request(\WP_REST_Request $request)
-    {
-        // Let the script continue even if the client disconnects
-        ignore_user_abort(true);
+    {          
+        $logger = new Logger();
 
-        // Close the connection immediately with 200 OK and no content
+        ignore_user_abort(true);
         header("Connection: close");
         http_response_code(200);
         header("Content-Length: 0");
         flush();
-
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
         }
@@ -46,7 +45,9 @@ class ProductSync
         // == Continue in background ==
 
         // self::delete_all();
-        self::perform_sync();
+        self::perform_sync($logger);
+        $logger->stop();
+        self::log($logger->__tostring());
         // self::log_request($request);
 
         exit;
@@ -62,9 +63,9 @@ class ProductSync
     }
 
 
-    public static function perform_sync()
+    public static function perform_sync(Logger $logger)
     {
-        $airtable_data = self::get_airtable_data();
+        $airtable_data = self::get_airtable_data($logger);
 
         $products = wc_get_products(['limit' => -1]);
 
@@ -79,18 +80,18 @@ class ProductSync
             $data = $airtable_data[$id];
             unset($airtable_data[$id]);
             if ($data->time !== $product->get_meta('time', true)) {
-                self::update_record($product, $data);
+                self::update_record($product, $data, $logger);
             }
         }
 
         // Create new products for remaining Airtable records
         foreach ($airtable_data as $id => $data) {
             $product = new \WC_Product_Simple();
-            self::update_record($product, $data);
+            self::update_record($product, $data, $logger);
         }
     }
 
-    private static function update_record($product, $data)
+    private static function update_record($product, $data, $logger)
     {
         $product->set_name($data->name);
         $product->set_price($data->price);
@@ -102,7 +103,7 @@ class ProductSync
 
         if (count($data->photos) != 0) {
             $photo = $data->photos[0];
-            $image_id = self::get_or_download_image($photo->id, $photo->url);
+            $image_id = self::get_or_download_image($photo->id, $photo->url, $logger);
             if ($image_id) {
                 $product->set_image_id($image_id);
             }
@@ -111,7 +112,7 @@ class ProductSync
         $product->save();
     }
 
-    private static function get_or_download_image($photo_id, $url)
+    private static function get_or_download_image($photo_id, $url, $logger)
     {
         $existing = get_page_by_title($photo_id, OBJECT, 'attachment');
 
@@ -119,6 +120,7 @@ class ProductSync
             return $existing->ID;
         }
 
+        $logger->api_calls++;
         $tmp = download_url($url);
 
         if (is_wp_error($tmp)) {
@@ -151,7 +153,7 @@ class ProductSync
     }
 
 
-    private static function get_airtable_data(): array
+    private static function get_airtable_data(Logger $logger): array
     {
         $api_key = defined('AIRBERRY_API_KEY') ? AIRBERRY_API_KEY : 'the_key_is_missing';
         $base_id = 'appSZ5xnr8W0wI5tN';
@@ -180,6 +182,7 @@ class ProductSync
 
         $url = "https://api.airtable.com/v0/{$base_id}/{$table}?{$query}";
 
+        $logger->api_calls++;
         $response = wp_remote_get($url, [
             'headers' => [
                 'Authorization' => 'Bearer ' . $api_key,
@@ -187,12 +190,15 @@ class ProductSync
         ]);
 
         if (is_wp_error($response)) {
+            self::log('api call error: ' . $response->get_error_message());
             return [];
         }
 
         $body = wp_remote_retrieve_body($response);
         $json = json_decode($body, true);
         if (empty($json['records'])) {
+            self::log('there are no records');
+            self::log($json);
             return [];
         }
 
@@ -225,7 +231,6 @@ class ProductSync
 
             $data[$id] = new ProductData($id, $fields['Cena copu'], $fields['Datum modifikace'], $des, $photos);
         }
-
         return $data;
     }
 
