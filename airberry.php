@@ -160,6 +160,7 @@ class ProductSync
         $table = 'tblHi0Fn7quCOwSFJ';
 
         $fields = [
+            'fldDW4ah6yVUbpNTi',
             'fldmlebQ5td40INq6',
             'fld0infbLQmtiGaEH',
             'fldLjMVW7MgmC85Xb',
@@ -206,7 +207,7 @@ class ProductSync
 
         foreach ($json['records'] as $record) {
             $fields = $record['fields'];
-            $id = $record['id'];
+            $id = $fields['Číslo'];
 
             $photos = [];
             if (!empty($fields['Fotky'])) {
