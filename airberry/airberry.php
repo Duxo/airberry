@@ -1,7 +1,4 @@
 <?php
-/**
- * Plugin Name: AirBerry
- */
 
 namespace AirBerry;
 
@@ -12,6 +9,8 @@ require_once ABSPATH . 'wp-admin/includes/media.php';
 require_once ABSPATH . 'wp-admin/includes/image.php';
 require_once 'product.php';
 require_once 'logger.php';
+
+ProductSync::init();
 
 class ProductSync
 {
@@ -30,7 +29,7 @@ class ProductSync
     }
 
     public static function handle_request(\WP_REST_Request $request)
-    {          
+    {
         $logger = new Logger();
 
         ignore_user_abort(true);
@@ -263,8 +262,4 @@ class ProductSync
         $message = print_r($log_data, true);
         self::log("=== WP REST Request ===\n" . $message . "\n");
     }
-
-
 }
-
-ProductSync::init();
