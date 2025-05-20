@@ -8,17 +8,18 @@ class ProductData
 
     public string $price;
 
-    public string $time;
     public string $description;
     public array $photos;
 
-    public function __construct(string $name, string $price, string $time, string $description, array $photos)
+    public bool $sell_by_weight;
+
+    public function __construct(string $name, string $price, string $description, array $photos, bool $sell_by_weight)
     {
         $this->name = $name;
         $this->price = $price;
-        $this->time = $time;
         $this->description = $description;
         $this->photos = $photos;
+        $this->sell_by_weight = $sell_by_weight;
     }
 }
 

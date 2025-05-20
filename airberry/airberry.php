@@ -96,9 +96,6 @@ class ProductSync
         $product->set_price($data->price);
         $product->set_regular_price($data->price);
         $product->set_description($data->description);
-        $product->set_meta_data([
-            'time' => $data->time
-        ]);
 
         if (count($data->photos) != 0) {
             $photo = $data->photos[0];
@@ -155,29 +152,44 @@ class ProductSync
     private static function get_airtable_data(Logger $logger): array
     {
         $api_key = defined('AIRBERRY_API_KEY') ? AIRBERRY_API_KEY : 'the_key_is_missing';
-        $base_id = 'appSZ5xnr8W0wI5tN';
-        $table = 'tblHi0Fn7quCOwSFJ';
-
+        $base_id = 'appZPDCjfJhFvNq09';
+        $table = 'tblYnNFl6HFBkyttV';
         $fields = [
-            'fldDW4ah6yVUbpNTi',
-            'fldmlebQ5td40INq6',
-            'fld0infbLQmtiGaEH',
-            'fldLjMVW7MgmC85Xb',
-            'fldfEfr9bdZdv8ADH',
-            'fldDPGRoce8ES0X4s',
-            'fldiZgqzdrMJ00QWA',
-            'fldQtoHZjVvA0Lmb0',
-            'fldtU8mqRISmCw29z',
-            'fldTIsRuxxk4lrd6O',
-            'fldM1MgpPk3qfjdLR',
-            'fld3ssxZ1B9A63KRe',
-            'fldErzGjMLbDvDK5q',
-            'fldgHmpQj7pm8kgT8'
+            'fldU1Raf5P6THroHu', // Číslo
+            'fldaNfRswOv3RtOU0', // Fotky
+            'fldn7zGh4f1dVnRNJ', // Na skladě
+            'fldDq1bO4Ko3wKoei', // Cena za gram
+            'fldhnaf9K7xsOILsT', // Délka
+            'fldwJ2r7auac1abrT', // Tmavost
+            'fldUUtRmbvjDo2ySE', // Stav copu
+            'fldz43qxcIXIw2rKM', // Struktura
+            'fld7ybHXicGzwNXZc', // Jemnost
+            'fldKZVmoQZ3l8yDXL', // Původ
+            'fldEyuH0Gegf698sA', // Odstín
+            'fldkxfxX0SkzC5lFq', // Lesk
+            'fldJ26gtk8AOxhVgP', // Šediny
+            'fld4jVXlkdTTVgSsG', // Sleva kadeřnice
+            'fld5MySAm1Fe5Sg6O', // Sleva kadeřnice+
+            'fld4pALElQ0nEb41N', // Obecná sleva
+            'fldVkVbGhNhANjhZC', // Povolit prodej na váhu
         ];
 
-        $query = http_build_query([
-            'filterByFormula' => 'Stav = "Aktivní"',
-            'fields' => $fields
+        $offset = "";
+        $all = [];
+        do{
+            [$data, $offset] = self::get_airtable_data_page($logger, $api_key, $base_id, $table, $fields, $offset);
+            $all = array_merge($all, $data);
+        }while($offset != "");
+        
+        return $all;
+    }
+
+    private static function get_airtable_data_page(Logger $logger, $api_key, $base_id, $table, $fields, $offset)
+    {
+         $query = http_build_query([
+            'filterByFormula' => 'Na skladě > 0',
+            'fields' => $fields,
+            'offset' => $offset
         ]);
 
         $url = "https://api.airtable.com/v0/{$base_id}/{$table}?{$query}";
@@ -191,7 +203,7 @@ class ProductSync
 
         if (is_wp_error($response)) {
             self::log('api call error: ' . $response->get_error_message());
-            return [];
+            return [[], ""];
         }
 
         $body = wp_remote_retrieve_body($response);
@@ -199,14 +211,20 @@ class ProductSync
         if (empty($json['records'])) {
             self::log('there are no records');
             self::log($json);
-            return [];
+            return [[], ""];
         }
 
         $data = [];
+        $offset = $json['offset'] ?? "";
 
         foreach ($json['records'] as $record) {
             $fields = $record['fields'];
+            
             $id = $fields['Číslo'];
+            $sell_by_weight = false;
+            if (isset($fields["Povolit prodej na váhu"]) && $fields["Povolit prodej na váhu"]=="Ano"){
+                $sell_by_weight = true;
+            }
 
             $photos = [];
             if (!empty($fields['Fotky'])) {
@@ -218,7 +236,7 @@ class ProductSync
             $des = '';
 
             $des .= isset($fields['Délka']) ? "Délka: {$fields['Délka']}\n" : '';
-            $des .= isset($fields['Váha']) ? "Váha: {$fields['Váha']}\n" : '';
+            $des .= isset($fields['Na skladě']) ? "Váha: {$fields['Váha']}\n" : '';
             $des .= isset($fields['Tmavost']) ? "Tmavost: {$fields['Tmavost']}\n" : '';
             $des .= isset($fields['Struktura']) ? "Struktura: {$fields['Struktura']}\n" : '';
             $des .= isset($fields['Jemnost']) ? "Jemnost: {$fields['Jemnost']}\n" : '';
@@ -226,12 +244,13 @@ class ProductSync
             $des .= isset($fields['Cena za gram']) ? "Cena za gram: {$fields['Cena za gram']}\n" : '';
             $des .= isset($fields['Lesk']) ? "Lesk: {$fields['Lesk']}\n" : '';
             $des .= isset($fields['Stav copu']) ? "Stav copu: {$fields['Stav copu']}\n" : '';
+            $des .= isset($fields['Šediny']) ? "Šedinky: {$fields['Šediny']}\n" : '';
             $des .= isset($fields['Poznámka']) && $fields['Poznámka'] !== '' ? "Poznámka: {$fields['Poznámka']}\n" : '';
             $des = trim($des);
 
-            $data[$id] = new ProductData($id, $fields['Cena copu'], $fields['Datum modifikace'], $des, $photos);
+            $data[$id] = new ProductData($id, $fields['Cena copu'], $des, $photos, $sell_by_weight );
         }
-        return $data;
+        return [$data, $offset];
     }
 
     private static function log($message)
