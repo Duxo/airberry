@@ -152,46 +152,21 @@ class ProductSync
     private static function get_airtable_data(Logger $logger): array
     {
         $api_key = defined('AIRBERRY_API_KEY') ? AIRBERRY_API_KEY : 'the_key_is_missing';
-        $base_id = 'appZPDCjfJhFvNq09';
-        $table = 'tblYnNFl6HFBkyttV';
-        $fields = [
-            'fldU1Raf5P6THroHu', // Číslo
-            'fldaNfRswOv3RtOU0', // Fotky
-            'fldn7zGh4f1dVnRNJ', // Na skladě
-            'fldDq1bO4Ko3wKoei', // Cena za gram
-            'fldhnaf9K7xsOILsT', // Délka
-            'fldwJ2r7auac1abrT', // Tmavost
-            'fldUUtRmbvjDo2ySE', // Stav copu
-            'fldz43qxcIXIw2rKM', // Struktura
-            'fld7ybHXicGzwNXZc', // Jemnost
-            'fldKZVmoQZ3l8yDXL', // Původ
-            'fldEyuH0Gegf698sA', // Odstín
-            'fldkxfxX0SkzC5lFq', // Lesk
-            'fldJ26gtk8AOxhVgP', // Šediny
-            'fld4jVXlkdTTVgSsG', // Sleva kadeřnice
-            'fld5MySAm1Fe5Sg6O', // Sleva kadeřnice+
-            'fld4pALElQ0nEb41N', // Obecná sleva
-            'fldVkVbGhNhANjhZC', // Povolit prodej na váhu
-        ];
-
         $offset = "";
         $all = [];
-        do{
-            [$data, $offset] = self::get_airtable_data_page($logger, $api_key, $base_id, $table, $fields, $offset);
+        do {
+            [$data, $offset] = self::get_airtable_data_page($logger, $api_key, $offset);
             $all = array_merge($all, $data);
-        }while($offset != "");
-        
+        } while ($offset != "");
+
         return $all;
     }
 
-    private static function get_airtable_data_page(Logger $logger, $api_key, $base_id, $table, $fields, $offset)
-    {
-         $query = http_build_query([
-            'filterByFormula' => 'Na skladě > 0',
-            'fields' => $fields,
-            'offset' => $offset
-        ]);
-
+    private static function get_airtable_data_page(Logger $logger, $api_key, $offset)
+    {      
+        $base_id = 'appZPDCjfJhFvNq09';
+        $table = 'tblYnNFl6HFBkyttV';
+        $query = get_request_fields($offset);
         $url = "https://api.airtable.com/v0/{$base_id}/{$table}?{$query}";
 
         $logger->api_calls++;
@@ -219,36 +194,8 @@ class ProductSync
 
         foreach ($json['records'] as $record) {
             $fields = $record['fields'];
-            
-            $id = $fields['Číslo'];
-            $sell_by_weight = false;
-            if (isset($fields["Povolit prodej na váhu"]) && $fields["Povolit prodej na váhu"]=="Ano"){
-                $sell_by_weight = true;
-            }
-
-            $photos = [];
-            if (!empty($fields['Fotky'])) {
-                foreach ($fields['Fotky'] as $photo) {
-                    $photos[] = new Image($photo['id'], $photo['url']);
-                }
-            }
-
-            $des = '';
-
-            $des .= isset($fields['Délka']) ? "Délka: {$fields['Délka']}\n" : '';
-            $des .= isset($fields['Na skladě']) ? "Váha: {$fields['Váha']}\n" : '';
-            $des .= isset($fields['Tmavost']) ? "Tmavost: {$fields['Tmavost']}\n" : '';
-            $des .= isset($fields['Struktura']) ? "Struktura: {$fields['Struktura']}\n" : '';
-            $des .= isset($fields['Jemnost']) ? "Jemnost: {$fields['Jemnost']}\n" : '';
-            $des .= isset($fields['Původ']) ? "Původ: {$fields['Původ']}\n" : '';
-            $des .= isset($fields['Cena za gram']) ? "Cena za gram: {$fields['Cena za gram']}\n" : '';
-            $des .= isset($fields['Lesk']) ? "Lesk: {$fields['Lesk']}\n" : '';
-            $des .= isset($fields['Stav copu']) ? "Stav copu: {$fields['Stav copu']}\n" : '';
-            $des .= isset($fields['Šediny']) ? "Šedinky: {$fields['Šediny']}\n" : '';
-            $des .= isset($fields['Poznámka']) && $fields['Poznámka'] !== '' ? "Poznámka: {$fields['Poznámka']}\n" : '';
-            $des = trim($des);
-
-            $data[$id] = new ProductData($id, $fields['Cena copu'], $des, $photos, $sell_by_weight );
+            $d = new ProductData($fields);
+            $data[$d->name] = $d;
         }
         return [$data, $offset];
     }
