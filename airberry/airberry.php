@@ -69,22 +69,22 @@ class ProductSync
         $products = wc_get_products(['limit' => -1]);
 
         foreach ($products as $product) {
-            $id = $product->get_name();
+            $name = $product->get_name();
 
-            if (!isset($airtable_data[$id])) {
+            if (!isset($airtable_data[$name])) {
                 wp_delete_post($product->get_id(), true);
                 continue;
             }
 
-            $data = $airtable_data[$id];
-            unset($airtable_data[$id]);
+            $data = $airtable_data[$name];
+            unset($airtable_data[$name]);
             if ($data->time !== $product->get_meta('time', true)) {
                 self::update_record($product, $data, $logger);
             }
         }
 
         // Create new products for remaining Airtable records
-        foreach ($airtable_data as $id => $data) {
+        foreach ($airtable_data as $data) {
             $product = new \WC_Product_Simple();
             self::update_record($product, $data, $logger);
         }
@@ -96,6 +96,7 @@ class ProductSync
         $product->set_price($data->price);
         $product->set_regular_price($data->price);
         $product->set_description($data->description);
+        $product->set_sold_individually(true);
 
         if (count($data->photos) != 0) {
             $photo = $data->photos[0];
@@ -104,8 +105,9 @@ class ProductSync
                 $product->set_image_id($image_id);
             }
         }
-
         $product->save();
+        wp_set_object_terms($product->get_id(), $data->category, 'product_cat');
+        wp_set_object_terms($product->get_id(), $data->tags, 'product_tag');
     }
 
     private static function get_or_download_image($photo_id, $url, $logger)
@@ -163,7 +165,7 @@ class ProductSync
     }
 
     private static function get_airtable_data_page(Logger $logger, $api_key, $offset)
-    {      
+    {
         $base_id = 'appZPDCjfJhFvNq09';
         $table = 'tblYnNFl6HFBkyttV';
         $query = get_request_fields($offset);
