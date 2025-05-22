@@ -78,7 +78,7 @@ class ProductSync
 
             $data = $airtable_data[$name];
             unset($airtable_data[$name]);
-            if ($data->time !== $product->get_meta('time', true)) {
+            if ($data->time !== $product->get_meta('data', true)->time) {
                 self::update_record($product, $data, $logger);
             }
         }
@@ -93,11 +93,12 @@ class ProductSync
     private static function update_record($product, $data, $logger)
     {
         $product->set_name($data->name);
+
         $product->set_price($data->price);
         $product->set_regular_price($data->price);
+
         $product->set_description($data->description);
         $product->set_sold_individually(true);
-
         if (count($data->photos) != 0) {
             $photo = $data->photos[0];
             $image_id = self::get_or_download_image($photo->id, $photo->url, $logger);
@@ -105,9 +106,12 @@ class ProductSync
                 $product->set_image_id($image_id);
             }
         }
+
+        $product->update_meta_data('data', $data);
+
         $product->save();
-        wp_set_object_terms($product->get_id(), $data->category, 'product_cat');
-        wp_set_object_terms($product->get_id(), $data->tags, 'product_tag');
+        wp_set_object_terms($product->get_id(), 'Nějaká Kategorie', 'product_cat');
+        wp_set_object_terms($product->get_id(), ['tag1', 'tag2'], 'product_tag');
     }
 
     private static function get_or_download_image($photo_id, $url, $logger)

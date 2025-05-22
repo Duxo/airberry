@@ -6,11 +6,19 @@ namespace AirBerry;
 function get_request_fields($offset)
 {
     $fields = [
+        // technical data
         'Číslo',
         'Fotky',
-        'Na skladě',
         'Cena',
         'Cena za gram',
+        'Sleva kadeřnice',
+        'Sleva kadeřnice+',
+        'Obecná sleva',
+        'Povolit prodej na váhu',
+        'Datum modifikace',
+
+        // data for only filtering
+        'Na skladě',
         'Délka',
         'Tmavost',
         'Stav copu',
@@ -20,11 +28,6 @@ function get_request_fields($offset)
         'Odstín',
         'Lesk',
         'Šediny',
-        'Sleva kadeřnice',
-        'Sleva kadeřnice+',
-        'Obecná sleva',
-        'Povolit prodej na váhu',
-        'Datum modifikace',
     ];
 
     return http_build_query([
@@ -37,22 +40,34 @@ function get_request_fields($offset)
 
 class ProductData
 {
-    public string $name;
-
-    public string $price;
-
-    public string $description;
-    public array $photos;
-
+    // these are important for later use
     public bool $sell_by_weight;
+    public int $price;
+    public int $price_per_gram;
+    public float $discount1; // kadeřnice
+    public float $discount2; // kadeřnice+
+    public float $discount3; // general discount
+    public string $time; // can be string because it is tested against exact match
 
-    public string $time;
-
-    public string $category;
-    public array $tags = [];
+    // these are used just once
+    public string $name;
+    public array $photos;
+    public array $meta_keys; // all other meta keys (for filtering)
+    public string $description;
 
     public function __construct($fields)
     {
+        $this->sell_by_weight = false;
+        if (isset($fields['Povolit prodej na váhu']) && $fields['Povolit prodej na váhu'] == "Ano") {
+            $this->sell_by_weight = true;
+        }
+        $this->price = $fields['Cena'];
+        $this->price_per_gram = $fields['Cena za gram'];
+        $this->discount1 = $fields['Sleva kadeřnice'];
+        $this->discount2 = $fields['Sleva kadeřnice+'];
+        $this->discount3 = $fields['Obecná sleva'];
+        $this->time = $fields['Datum modifikace'];
+
         $this->name = 'Vlasy: ' . $fields['Číslo'];
         $this->photos = [];
         if (!empty($fields['Fotky'])) {
@@ -60,14 +75,11 @@ class ProductData
                 $this->photos[] = new Image($photo['id'], $photo['url']);
             }
         }
-        $this->sell_by_weight = false;
-        if (isset($fields['Povolit prodej na váhu']) && $fields['Povolit prodej na váhu'] == "Ano") {
-            $this->sell_by_weight = true;
-        }
 
-        $this->price = $fields['Cena'];
 
-        $this->time = $fields['Datum modifikace'];
+        // TODO set the rest of the fields
+
+        
 
         $des = '';
         $des .= isset($fields['Délka']) ? "Délka: {$fields['Délka']}\n" : '';
@@ -80,11 +92,9 @@ class ProductData
         $des .= isset($fields['Lesk']) ? "Lesk: {$fields['Lesk']}\n" : '';
         $des .= isset($fields['Stav copu']) ? "Stav copu: {$fields['Stav copu']}\n" : '';
         $des .= isset($fields['Šediny']) ? "Šedinky: {$fields['Šediny']}\n" : '';
+        $des .= isset($fields['Odstín']) ? "Odstín: {$fields['Odstín']}\n" : '';
         $des .= isset($fields['Poznámka']) && $fields['Poznámka'] !== '' ? "Poznámka: {$fields['Poznámka']}\n" : '';
         $this->description = trim($des);
-
-        $this->category = "Category1";
-        $this->tags = ["tag1", "tag2"];
     }
 }
 
