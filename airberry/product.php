@@ -61,11 +61,11 @@ class ProductData
         if (isset($fields['Povolit prodej na váhu']) && $fields['Povolit prodej na váhu'] == "Ano") {
             $this->sell_by_weight = true;
         }
-        $this->price = $fields['Cena'];
-        $this->price_per_gram = $fields['Cena za gram'];
-        $this->discount1 = $fields['Sleva kadeřnice'];
-        $this->discount2 = $fields['Sleva kadeřnice+'];
-        $this->discount3 = $fields['Obecná sleva'];
+        $this->price = intval($fields['Cena']);
+        $this->price_per_gram = intval($fields['Cena za gram']);
+        $this->discount1 = floatval($fields['Sleva kadeřnice']);
+        $this->discount2 = floatval($fields['Sleva kadeřnice+']);
+        $this->discount3 = floatval($fields['Obecná sleva']);
         $this->time = $fields['Datum modifikace'];
 
         $this->name = 'Vlasy: ' . $fields['Číslo'];
@@ -76,10 +76,11 @@ class ProductData
             }
         }
 
-
-        // TODO set the rest of the fields
-
-        
+        $this->meta_keys = [
+            'color' => 'blue',
+            'length' => '20cm',
+            'texture' => 'smooth',
+        ];
 
         $des = '';
         $des .= isset($fields['Délka']) ? "Délka: {$fields['Délka']}\n" : '';

@@ -46,7 +46,7 @@ class ProductSync
         // self::delete_all();
         self::perform_sync($logger);
         $logger->stop();
-        self::log($logger->__tostring());
+        log($logger->__tostring());
         // self::log_request($request);
 
         exit;
@@ -78,7 +78,9 @@ class ProductSync
 
             $data = $airtable_data[$name];
             unset($airtable_data[$name]);
-            if ($data->time !== $product->get_meta('data', true)->time) {
+            
+            $saved = $product->get_meta('data', true);
+            if ($data->time !== $saved->time) {
                 self::update_record($product, $data, $logger);
             }
         }
@@ -108,6 +110,9 @@ class ProductSync
         }
 
         $product->update_meta_data('data', $data);
+        foreach ($data->meta_keys as $key => $val) {
+            $product->update_meta_data($key, $val);
+        }
 
         $product->save();
         wp_set_object_terms($product->get_id(), 'Nějaká Kategorie', 'product_cat');
@@ -183,15 +188,15 @@ class ProductSync
         ]);
 
         if (is_wp_error($response)) {
-            self::log('api call error: ' . $response->get_error_message());
+            log('api call error: ' . $response->get_error_message());
             return [[], ""];
         }
 
         $body = wp_remote_retrieve_body($response);
         $json = json_decode($body, true);
         if (empty($json['records'])) {
-            self::log('there are no records');
-            self::log($json);
+            log('there are no records');
+            log($json);
             return [[], ""];
         }
 
@@ -204,15 +209,6 @@ class ProductSync
             $data[$d->name] = $d;
         }
         return [$data, $offset];
-    }
-
-    private static function log($message)
-    {
-        $pluginlog = plugin_dir_path(__FILE__) . 'debug.log';
-        if (!is_string($message)) {
-            $message = print_r($message, true);
-        }
-        error_log($message . "\n", 3, $pluginlog);
     }
 
     private static function log_request(\WP_REST_Request $request)
@@ -232,6 +228,15 @@ class ProductSync
         ];
 
         $message = print_r($log_data, true);
-        self::log("=== WP REST Request ===\n" . $message . "\n");
+        log("=== WP REST Request ===\n" . $message . "\n");
     }
+}
+
+function log($message)
+{
+    $pluginlog = plugin_dir_path(__FILE__) . 'debug.log';
+    if (!is_string($message)) {
+        $message = print_r($message, true);
+    }
+    error_log($message . "\n", 3, $pluginlog);
 }
